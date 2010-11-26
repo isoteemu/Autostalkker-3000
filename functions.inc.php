@@ -141,41 +141,38 @@ function fb_picture(FBUser $user, $url=null) {
 	$sizes = array('n', 'o'); // 's', 'a'
 
 	$name = trim($user->name);
+	$urls = array();
 
 	// Only jpegs
 	if(!preg_match('/.jpg$/',$url)) return false;
-	if(preg_match('/(_\w).jpg$/',$url)) {
-		$sizes = array('n', 'o'); // 's', 'a'
-	} else {
-		$sizes = array('');
+	if(preg_match('/\/[0-9_]+(_\w).jpg$/',$url)) {
+		foreach($sizes as $suffix) {
+			$urls[] = preg_replace('/(_\w).jpg$/', '_'.$suffix.'.jpg', $url);
+		}
+	} elseif(preg_match('/\/(\w)[0-9_]+.jpg$/',$url)) {
+		foreach($sizes as $suffix) {
+			$urls[] = preg_replace('/\/(\w)([0-9_]+).jpg$/', '/'.$suffix.'\2.jpg', $url);
+		}
 	}
+
+	$urls[] = $url;
 
 	$path = $user->path();
 
-	foreach($sizes as $suffix) {
-		if(!empty($suffix))
-			$url = preg_replace('/(_\w).jpg$/', '_'.$suffix.'.jpg', $url);
+	foreach($urls as $_url) {
 
-		$file = basename($name)." - ".basename($url);
+		$file = basename($name)." - ".basename($_url);
 		if(file_exists($path.'/'.$file)) return $file;
 
 		$dest = $path.'/'.$file;
 
 		// Using kde-cp to get metadata into nepomuk
-		$cmd = sprintf('kde-cp --noninteractive %s %s', escapeshellarg($url), escapeshellarg($dest));
-		echo " * Copying image to $file\n";
+		$cmd = sprintf('kde-cp --noninteractive %s %s', escapeshellarg($_url), escapeshellarg($dest));
+		echo " * Copying $_url image to $file\n";
 		echo exec($cmd);
 
 		if(file_exists($dest)) {
-			if(file_exists(NEPOMUK_TAGGER) && is_executable(NEPOMUK_TAGGER)) {
-				$tagCmd = sprintf('%s --tag=%s --tag="Facebook Photo" --description=%s %s',
-					NEPOMUK_TAGGER,
-					escapeshellarg($name),
-					escapeshellarg('Source: '.$url),
-					escapeshellarg($dest)
-				);
-				echo exec($tagCmd);
-			}
+			NepomukUtil::tagFBUser($user, $dest);
 			return $file;
 		}
 	}
@@ -193,7 +190,7 @@ function fb_profile_photos(FBUser $user) {
 			break;
 		}
 	}
-
+ 
 	if($profile) {
 		$photos = $facebook->api($profile.'/photos');
 		foreach($photos['data'] as $picture) {
@@ -234,14 +231,33 @@ function fb_get_photo($user, $pid, $url=null) {
 	echo " * Scrapped photo $pid\n";
 	$data = $facebook->api("/$pid");
 	if($data) {
+		$photo = fb_picture($tagged, $data['source']);
 		foreach($data['tags']['data'] as $person) {
 			$tagged = new FBUser();
 			$tagged->id = $person['id'];
 			$tagged->name = trim($person['name']);
 			echo " * > Found tagged user {$tagged->name}\n";
-			fb_picture($tagged, $data['source']);
+			NepomukUtil::tagFBUser($tagged, $photo);
 		}
 	} elseif($url != null) {
 		fb_picture($user, $url);
+	}
+}
+
+/**
+ * Tag image with user
+ */
+Class NepomukUtil {
+	public static function tagFBUser(FBUser $user, $picture) {
+		if(file_exists(NEPOMUK_TAGGER) && is_executable(NEPOMUK_TAGGER)) {
+			$tagCmd = sprintf('%s --tag="Facebook Photo" --tag=%s %s',
+				NEPOMUK_TAGGER,
+				escapeshellarg($user->name),
+				escapeshellarg($dest)
+			);
+			exec($tagCmd);
+			return true;
+		}
+		return false;
 	}
 }
