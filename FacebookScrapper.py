@@ -82,14 +82,21 @@ class FacebookScrapper:
 		return self
 
 	def photos(self, fbid):
-		page = 1
-		url = self.urls['photos'] + urllib.urlencode([('id', fbid), ('page', page)])
-		result = self.httpRequest(url)
-		page = result.read()
-		images = re.findall(r'<a href="/photo.php\?fbid=(\d+)(?=&)[^"]*"[^>]*><img [^>]*\ssrc="([^"]+)[^>]*></a>', page, re.S + re.U)
+		page_number = 1
 		list = {}
-		for pid, thumb in images:
-			list[pid] = thumb
+
+		while True:
+			url = self.urls['photos'] + urllib.urlencode([('id', fbid), ('page', page_number)])
+			result = self.httpRequest(url)
+			page = result.read()
+			images = re.findall(r'<a href="/photo.php\?fbid=(\d+)(?=&)[^"]*"[^>]*><img [^>]*\ssrc="([^"]+)[^>]*></a>', page, re.S + re.U)
+			for pid, thumb in images:
+				list[pid] = thumb
+
+			if len(images) == 10:
+				page_number = page_number + 1
+			else:
+				break
 		return list
 
 	def friends(self, fbid):
