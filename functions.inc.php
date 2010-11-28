@@ -162,18 +162,18 @@ function fb_picture(FBUser $user, $url=null) {
 	foreach($urls as $_url) {
 
 		$file = basename($name)." - ".basename($_url);
-		if(file_exists($path.'/'.$file)) return $file;
-
 		$dest = $path.'/'.$file;
+
+		if(file_exists($dest)) return $dest;
 
 		// Using kde-cp to get metadata into nepomuk
 		$cmd = sprintf('kde-cp --noninteractive %s %s', escapeshellarg($_url), escapeshellarg($dest));
 		echo " * Copying $_url image to $file\n";
-		echo exec($cmd);
+		exec($cmd);
 
 		if(file_exists($dest)) {
 			NepomukUtil::tagFBUser($user, $dest);
-			return $file;
+			if(file_exists($dest)) return $dest;
 		}
 	}
 }
@@ -231,33 +231,108 @@ function fb_get_photo($user, $pid, $url=null) {
 	echo " * Scrapped photo $pid\n";
 	$data = $facebook->api("/$pid");
 	if($data) {
-		$photo = fb_picture($tagged, $data['source']);
+		$photo = fb_picture($user, $data['source']);
+		if(!$photo) return false;
+
+		$faces = new FaceDetect($photo);
+
 		foreach($data['tags']['data'] as $person) {
+			if(!$person['id']) continue;
 			$tagged = new FBUser();
 			$tagged->id = $person['id'];
 			$tagged->name = trim($person['name']);
 			echo " * > Found tagged user {$tagged->name}\n";
-			NepomukUtil::tagFBUser($tagged, $photo);
+
+			if($faces->fbSearch($person)) {
+				echo " * > Found face for {$tag['name']}\n";
+				NepomukUtil::tagFBUser($tagged, $photo);
+			}
 		}
 	} elseif($url != null) {
 		fb_picture($user, $url);
 	}
 }
 
-/**
- * Tag image with user
- */
-Class NepomukUtil {
+class NepomukUtil {
+
+	/**
+	* Tag image with user
+	*/
 	public static function tagFBUser(FBUser $user, $picture) {
 		if(file_exists(NEPOMUK_TAGGER) && is_executable(NEPOMUK_TAGGER)) {
-			$tagCmd = sprintf('%s --tag="Facebook Photo" --tag=%s %s',
+			if($picture[0] != '/')
+				$picture = $user->path().'/'.$picture;
+
+			$tagCmd = sprintf('%s --tag=%s %s',
 				NEPOMUK_TAGGER,
 				escapeshellarg($user->name),
-				escapeshellarg($dest)
+				escapeshellarg($picture)
 			);
 			exec($tagCmd);
 			return true;
+		} else {
+			throw new RuntimeException('Nepomuktagger script was not found');
 		}
 		return false;
 	}
+}
+
+class FaceDetect {
+
+	const DETECTOR = './detect/detect';
+
+	public $photo;
+	public $faces = array();
+
+	public function __construct($photo) {
+		$this->photo = realpath($photo);
+		if(file_exists($photo))
+			$this->faces = $this->detect();
+	}
+
+	public function detect() {
+		exec(sprintf('%s %s',
+			self::DETECTOR,
+			escapeshellarg($this->photo)
+		), $lines);
+
+		$ret = array();
+
+		foreach($lines as $line) {
+			if(preg_match('/^(\d+),(\d+) (\d+)x(\d+)/', $line, $matches)) {
+				$ret[] = array(
+					'x' => $matches[1],
+					'y' => $matches[2],
+					'w' => $matches[3],
+					'h' => $matches[4]
+				);
+			}
+		}
+		return $ret;
+	}
+
+	/**
+	 * Facebook returns faces positions as relative (%),
+	 * so convert to pixels
+	 */
+	public function fbSearch(array $tag) {
+		$img = getimagesize($this->photo);
+		$x = $img[0] / 100 * $tag['x'];
+		$y = $img[1] / 100 * $tag['y'];
+
+		return $this->search($x, $y);
+	}
+
+
+	/// TODO: If multiple found, select nearest
+	public function search($x, $y) {
+		foreach($this->faces as $face) {
+			if($x >= $face['x'] && $x <= $face['x']+$face['w'] &&
+				$y >= $face['y'] && $y <= $face['y']+$face['h']) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 }
