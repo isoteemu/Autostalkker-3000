@@ -126,7 +126,7 @@ if __name__ == "__main__":
 	import getopt
 
 	def usage():
-		print "%s: [--friends] [--photos] [--config=file.json] UID" % sys.argv[0].split("/")[-1]
+		print "%s: [--friends] [--photos] UID" % sys.argv[0].split("/")[-1]
 
 	f = file('config.json', 'r')
 	config = json.loads(f.read())
