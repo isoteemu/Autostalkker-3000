@@ -120,7 +120,7 @@ class FBUser {
 		if( $this->id == $session['uid'] ) {
 			$friends = $facebook->api('/'.$this->id.'/friends');
 			foreach($friends['data'] as $friend) {
-				$user = new FBUser($friend['id'], $friends['name']);
+				$user = new FBUser($friend['id'], $friend['name']);
 				$list[$user->id] = $user;
 			}
 		} else {
@@ -302,7 +302,7 @@ class FacebookScrapper {
 		if(! $scrapper) return array();
 
 		$cmd = sprintf('%s --photos %s',
-			FACEBOOK_SCRAPPER,
+			$scrapper,
 			escapeshellarg($user->id)
 		);
 		$json = exec($cmd);
@@ -316,7 +316,7 @@ class FacebookScrapper {
 		if(!$scrapper) return array();
 
 		$cmd = sprintf('%s --friends %s',
-			FACEBOOK_SCRAPPER,
+			$scrapper,
 			escapeshellarg($user->id)
 		);
 		$json = exec($cmd);
