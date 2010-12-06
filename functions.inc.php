@@ -47,15 +47,62 @@ class FBUser {
 	public $id;
 	public $name;
 
+	// NOT a good place to be...
 	const PATH_PREFIX = '/home/teemu/Documents/Pictures/FB';
 
-	public function __construct($id=null) {
-		if($id) {
-			global $facebook;
-			$data = $facebook->api('/'.$id);
-			$this->id = $data['id'];
-			$this->name = $data['name'];
+	/**
+	 * Usernames to ID's cache
+	 */
+	protected static $usenameCache = array();
+
+	protected static $attributeCache = array();
+
+	public function __construct($id=null, $name=null) {
+		$username = null;
+		if($id !== null && !is_numeric($id)) {
+			// Try mapping username to ID
+			$username = strtolower(trim($id));
+			if(isset(self::$usenameCache[$username])) {
+				$id = self::$usenameCache[$username];
+			}
 		}
+
+		if($id !== null) {
+
+			if(is_numeric($id) && $name !== null) {
+				$this->id = $id;
+				$this->name = trim($name);
+			} else {
+				$data = $this->getAttibutes($id);
+				$this->id = $data['id'];
+				$this->name = $data['name'];
+			}
+
+			if($this->id) {
+				if($username !== null)
+					self::$usenameCache[$username] = $this->id;
+				$this->cacheAttributes($this);
+			}
+		}
+	}
+
+	protected function getAttibutes($id) {
+		if(!isset(self::$attributeCache[$id])) {
+			global $facebook;
+			self::$attributeCache[$id] = $facebook->api('/'.$id);
+		}
+		return self::$attributeCache[$id];
+	}
+
+	protected function cacheAttributes(FBUser $user) {
+		$id = $user->id;
+		if(!isset(self::$attributeCache[$id]))
+			self::$attributeCache[$id] = array();
+
+		self::$attributeCache[$id] += array(
+			'id' => $user->id,
+			'name' => $user->name
+		);
 	}
 
 	public function path() {
@@ -66,13 +113,22 @@ class FBUser {
 
 	public function friends() {
 		global $facebook;
-		$friends = $facebook->api('/'.$this->id.'/friends');
+		$session = $facebook->getSession();
+
 		$list = array();
-		foreach($friends['data'] as $friend) {
-			$user = new FBUser();
-			$user->id	= $friend['id'];
-			$user->name	= $friend['name'];
-			$list[$user->id] = $user;
+
+		if( $this->id == $session['uid'] ) {
+			$friends = $facebook->api('/'.$this->id.'/friends');
+			foreach($friends['data'] as $friend) {
+				$user = new FBUser($friend['id'], $friends['name']);
+				$list[$user->id] = $user;
+			}
+		} else {
+			$friends = FacebookScrapper::friends($this);
+			foreach($friends as $fbid => $name) {
+				$user = new FBUser($fbid, $name);
+				$list[$user->id] = $user;
+			}
 		}
 		return $list;
 	}
@@ -212,15 +268,8 @@ function fb_tagged_photos(FBUser $user) {
 }
 
 function fb_scrap_photos(FBUser $user) {
-	if(!is_executable(FACEBOOK_SCRAPPER)) return false;
 	echo " * Scrapping {$user->id}\n";
-	$cmd = sprintf('%s %s',
-		FACEBOOK_SCRAPPER,
-		escapeshellarg($user->id)
-	);
-	$json = exec($cmd);
-	$photos = json_decode($json);
-
+	$photos = FacebookScrapper::photos($user);
 	foreach($photos as $pid => $thumb) {
 		fb_get_photo($user, $pid, $thumb);
 	}
@@ -251,6 +300,44 @@ function fb_get_photo($user, $pid, $url=null) {
 	} elseif($url != null) {
 		fb_picture($user, $url);
 	}
+}
+
+class FacebookScrapper {
+	public static $scrapper = FACEBOOK_SCRAPPER;
+
+	public static function photos(FBUser $user) {
+		$scrapper = self::scrapper();
+		if(! $scrapper) return array();
+
+		$cmd = sprintf('%s --photos %s',
+			FACEBOOK_SCRAPPER,
+			escapeshellarg($user->id)
+		);
+		$json = exec($cmd);
+		$photos = json_decode($json);
+
+		return (array) $photos;
+	}
+
+	public static function friends(FBUser $user) {
+		$scrapper = self::scrapper();
+		if(!$scrapper) return array();
+
+		$cmd = sprintf('%s --friends %s',
+			FACEBOOK_SCRAPPER,
+			escapeshellarg($user->id)
+		);
+		$json = exec($cmd);
+		$friends = json_decode($json);
+		return (array) $friends;
+	}
+
+	public static function scrapper() {
+		if(!is_executable(self::$scrapper)) return false;
+		return self::$scrapper;
+	}
+
+
 }
 
 class NepomukUtil {
@@ -322,7 +409,6 @@ class FaceDetect {
 
 		return $this->search($x, $y);
 	}
-
 
 	/// TODO: If multiple found, select nearest
 	public function search($x, $y) {
