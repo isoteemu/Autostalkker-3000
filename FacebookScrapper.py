@@ -7,7 +7,6 @@ import urllib, operator
 import cookielib, urllib2
 
 # TODO Check if we are loggend _Really_
-# TODO Implement friendlist stalking
 class FacebookScrapper:
 
 	cookieFile = 'facebook-cookies-%s.txt'
@@ -113,7 +112,6 @@ class FacebookScrapper:
 				if pid == "":
 					pid = uid
 				list[pid] = name
-				print pid, name
 
 			if len(friends) == 10:
 				offset = offset + 1
@@ -123,12 +121,43 @@ class FacebookScrapper:
 		return list
 
 if __name__ == "__main__":
+	# Import more
 	import json
+	import getopt
+
+	def usage():
+		print "%s: [--friends] [--photos] [--config=file.json] UID" % sys.argv[0].split("/")[-1]
 
 	f = file('config.json', 'r')
 	config = json.loads(f.read())
 
-	if len(sys.argv[1:]) == 1:
-		fbid = unicode(sys.argv[1], 'utf-8')
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], "fp", ["friends", "photos"])
+	except getopt.GetoptError:
+		print "err:"
+		usage()
+		sys.exit(2)
+
+	if not args:
+		sys.stderr.write("Missing Facebook ID.\n")
+		usage()
+		sys.exit(2)
+
+	try:
 		fb = FacebookScrapper(config['user']['user'], config['user']['password'])
-		print json.dumps(fb.friends(fbid))
+	except RuntimeWarning:
+		sys.stderr.write("Could not login into Facebook.\n")
+		sys.exit(1)
+
+	for fbid in args:
+		fbid = unicode(fbid, 'utf-8')
+
+		for opt, arg in opts:
+			if opt in ("-f", "--friends"):
+				print json.dumps(fb.friends(fbid))
+			elif opt in ("-p", "--photos"):
+				print json.dumps(fb.photos(fbid))
+			else:
+				sys.stderr.write("Invalid option %s.\n" % opt)
+				usage()
+				sys.exit(2)
