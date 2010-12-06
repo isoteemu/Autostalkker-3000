@@ -175,13 +175,7 @@ function parse_ini_list($file) {
 	$users = array();
 	$lines = parse_ini_file($file);
 	foreach($lines as $id => $name) {
-		if(empty($name)) {
-			$user = new FBUser($id);
-		} else {
-			$user = new FBUser();
-			$user->id = $id;
-			$user->name = $name;
-		}
+		$user = new FBUser($id, $name);
 		$users[$user->id] = $user;
 	}
 	return $users;
@@ -287,9 +281,7 @@ function fb_get_photo($user, $pid, $url=null) {
 
 		foreach($data['tags']['data'] as $person) {
 			if(!$person['id']) continue;
-			$tagged = new FBUser();
-			$tagged->id = $person['id'];
-			$tagged->name = trim($person['name']);
+			$tagged = new FBUser($person['id'], $person['name']);
 			echo " * > Found tagged user {$tagged->name}\n";
 
 			if($faces->fbSearch($person)) {
