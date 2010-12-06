@@ -21,7 +21,7 @@ class FacebookScrapper:
 	urls = {
 		'login': 'http://m.facebook.com/',
 		'photos': 'http://m.facebook.com/photo_search.php?view=all&',
-		'friends': 'http://m.facebook.com/friends.php?'
+		'friends': 'http://m.facebook.com/friends.php?a&' # ?a is for "all"
 	}
 
 	cookieJar = cookielib.LWPCookieJar()
@@ -100,7 +100,27 @@ class FacebookScrapper:
 		return list
 
 	def friends(self, fbid):
-		url = self.urls['friends']
+		offset = 0
+		list = {}
+
+		while True:
+			url = self.urls['friends'] + urllib.urlencode([('id', fbid), ('f', offset*10)])
+			result = self.httpRequest(url)
+			page = result.read()
+			friends = re.findall(r'<div class="mfsm"><a href="/(profile.php\?id=(\d+)|[a-zA-Z0-9\.]+)(?=[&\?])[^"]*"[^>]*>([^<]+)</a>', page, re.S + re.U)
+
+			for uid, pid, name in friends:
+				if pid == "":
+					pid = uid
+				list[pid] = name
+				print pid, name
+
+			if len(friends) == 10:
+				offset = offset + 1
+			else:
+				break
+
+		return list
 
 if __name__ == "__main__":
 	import json
@@ -111,4 +131,4 @@ if __name__ == "__main__":
 	if len(sys.argv[1:]) == 1:
 		fbid = unicode(sys.argv[1], 'utf-8')
 		fb = FacebookScrapper(config['user']['user'], config['user']['password'])
-		print json.dumps(fb.photos(fbid))
+		print json.dumps(fb.friends(fbid))
