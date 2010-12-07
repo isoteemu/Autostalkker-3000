@@ -277,6 +277,7 @@ function fb_get_photo($user, $pid, $url=null) {
 		$photo = fb_picture($user, $data['source']);
 		if(!$photo) return false;
 
+		$people = array();
 		$faces = new FaceDetect($photo);
 
 		foreach($data['tags']['data'] as $person) {
@@ -284,11 +285,17 @@ function fb_get_photo($user, $pid, $url=null) {
 			$tagged = new FBUser($person['id'], $person['name']);
 			echo " * > Found tagged user {$tagged->name}\n";
 
-			if($faces->fbSearch($person)) {
-				echo " * > Found face for {$tag['name']}\n";
+			$face = $faces->fbSearch($person);
+			if($face !== false) {
+				$people[$face] = $tagged->name;
+				echo " * > Found face for {$tagged->name}\n";
 				NepomukUtil::tagFBUser($tagged, $photo);
 			}
 		}
+
+		if(count($people))
+			$faces->train($people);
+
 	} elseif($url != null) {
 		fb_picture($user, $url);
 	}
@@ -378,15 +385,18 @@ class FaceDetect {
 		$ret = array();
 
 		foreach($lines as $line) {
-			if(preg_match('/^(\d+),(\d+) (\d+)x(\d+)/', $line, $matches)) {
-				$ret[] = array(
-					'x' => $matches[1],
-					'y' => $matches[2],
-					'w' => $matches[3],
-					'h' => $matches[4]
+			
+			if(preg_match('/^(\d)+: (\d+),(\d+) (\d+)x(\d+)/', $line, $matches)) {
+				$ret[$matches[1]] = array(
+					'i' => $matches[1],
+					'x' => $matches[2],
+					'y' => $matches[3],
+					'w' => $matches[4],
+					'h' => $matches[5]
 				);
 			}
 		}
+
 		return $ret;
 	}
 
@@ -402,15 +412,53 @@ class FaceDetect {
 		return $this->search($x, $y);
 	}
 
-	/// TODO: If multiple found, select nearest
+	/**
+	 * Search if location contains face.
+	 * If multiple faces are found, selects nearest.
+	 */
 	public function search($x, $y) {
-		foreach($this->faces as $face) {
+		$found = array();
+		foreach($this->faces as $id => $face) {
 			if($x >= $face['x'] && $x <= $face['x']+$face['w'] &&
 				$y >= $face['y'] && $y <= $face['y']+$face['h']) {
-				return true;
+
+				// Calculate distance from centers
+				$fx = $face['x'] + $face['w']/2;
+				$fy = $face['y'] + $face['y']/2;
+
+				$dx = Max($fx, $x) - Min($fx, $x);
+				$dy = Max($fy, $y) - Min($fy, $y);
+				$distance = sqrt($dx + $dy);
+
+				$found[$id] = $distance;
 			}
 		}
-		return false;
+
+		if(!count($found)) return false;
+
+		# Select nearest
+		asort($found);
+		$face = array_shift(array_keys($found));
+		return $face;
+	}
+
+	/**
+	 * Train face detection.
+	 * Array should contain image index as key, and name as value
+	 */
+	public function train($updateVect = array()) {
+		$argv = array();
+		foreach($updateVect as $id => $name) {
+			$argv[] = sprintf('--face-%d=%s', $id, escapeshellarg($name));
+		}
+
+		$cmd = sprintf('%s %s %s',
+			self::DETECTOR,
+			implode(' ', $argv),
+			escapeshellarg($this->photo)
+		);
+		exec($cmd);
+
 	}
 
 }
