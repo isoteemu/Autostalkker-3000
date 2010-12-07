@@ -1,5 +1,4 @@
 /** ===========================================================
- * @file
  *
  * This file is a part of digiKam project
  * <a href="http://www.digikam.org">http://www.digikam.org</a>
@@ -23,106 +22,110 @@
  *
  * ============================================================ */
 
-// Qt includes
-
 #include <stdio.h>
 
-/*
-#include <QApplication>
-#include <QImage>
-#include <QGraphicsView>
-#include <QGraphicsScene>
-#include <QGraphicsPixmapItem>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPixmap>
-#include <QWidget>
-*/
+// Qt includes
+#include <QFile>
 #include <QDebug>
+#include <QDataStream>
 
 // KDE includes
-
-
 #include <kdebug.h>
 #include <kstandarddirs.h>
+
 
 // libkface includes
 
 #include "libkface/database.h"
-#include "libkface/face.h"
-#include "libkface/faceitem.h"
+#include <libkface/kfaceutils.h>
+
+namespace libface
+{
+    class Face;
+}
 
 using namespace KFaceIface;
 
-void detectFaces(Database* d, const QString& file)
+QList<Face> detectFaces(Database* d, const QString& file)
 {
-    qDebug() << "Loading" << file;
-    QImage img(file);
-    qDebug() << "Detecting";
-	QList<Face> result = d->detectFaces(img);//QString::fromLocal8Bit(argv[1]));
-    kDebug() << "Detected";
+	qDebug() << "Loading" << file;
+	QImage img(file);
+	qDebug() << "Detecting";
+	QList<Face> result = d->detectFaces(img);
+	kDebug() << "Detected";
 
-    if (result.isEmpty())
-    {
-        qDebug() << "No faces found";
-        return;
-    }
-   
+	if (result.isEmpty())
+	{
+		qDebug() << "No faces found";
+		return result;
+	}
+	for(int i = 0 ; i <result.size(); ++i) {
+		qDebug() << "detected face #" << result[i].id();
+	}
 
-    qDebug() << "Recognising faces";
-    QList<double> closeness = d->recognizeFaces(result);
-
+	qDebug() << "Recognising faces";
+	QList<double> closeness = d->recognizeFaces(result);
 
 	for(int i = 0 ; i <result.size(); ++i) {
 		Face f = result[i];
 		// Suggest name
 		QRect r = f.toRect();
-        qDebug() << "Detected face:" << r << "with id" << f.id();
-		qDebug() << "Name might be" << f.name() << "with closeness" << closeness;
+		qDebug() << "Recognised face:" << r << "with id" << f.id();
+		qDebug() << "Name might be" << f.name() << "with closeness" << closeness[i];
 
-		printf("%d,%d %dx%d\n",f.id(), r.x(), r.y(), r.width(), r.height());
-    }
+		printf("\n%d: %d,%d %dx%d\n", i, r.x(), r.y(), r.width(), r.height());
+	}
 
-    
-/*
-    QWidget* mainWidget = new QWidget;
-    mainWidget->setWindowTitle(file);
-    QHBoxLayout* layout = new QHBoxLayout(mainWidget);
-    QLabel* fullImage   = new QLabel;
-    fullImage->setPixmap(QPixmap::fromImage(img.scaled(250, 250, Qt::KeepAspectRatio)));
-    layout->addWidget(fullImage);
-
-    foreach (const Face& f, result)
-    {
-        QLabel* label = new QLabel;
-        label->setScaledContents(false);
-        QImage part   = img.copy(f.toRect());
-        label->setPixmap(QPixmap::fromImage(part.scaled(200, 200, Qt::KeepAspectRatio)));
-        layout->addWidget(label);
-    }
-
-    mainWidget->show();
-    qApp->processEvents(); // dirty hack
-	*/
+	return result;
 }
 
-int main(int argc, char** argv)
-{
-    if (argc < 2)
-    {
-        qDebug() << "Bad Args!!!\nUsage: " << argv[0] << " <image1> <image2> ...";
-        return 0;
-    }
+int main(int argc, char** argv) {
 
-    // Make a new instance of Database and then detect faces from the image
+	if (argc < 2) {
+		printf("Bad Args!\nUsage: %s [--face-1=\"name\"]... <image>", argv[0]);
+		return 2;
+	}
+
+	// Make a new instance of Database and then detect faces from the image
 	Database* d = new Database(Database::InitAll, KStandardDirs::locateLocal("data", "libkface/database/", true));
-	
-    for (int i=1; i<argc; i++)
-    {
-		qDebug() << argv[i];
-        detectFaces(d, QString::fromLocal8Bit(argv[i]));
-    }
-    //app.exec();
-	
-    return 0;
+
+	//d->setDetectionAccuracy(0.1);
+	//d->setDetectionSpecificity(0.1);
+
+	QList<Face> faces = detectFaces(d, QString::fromLocal8Bit(argv[ argc -1 ]));
+	QList<Face> trainingFaces;
+
+	if(faces.size() < 1) {
+		printf("Faces not found");
+		return 1;
+	}
+
+	for (int i=1; i<argc; i++)
+	{
+		int facenum = -1;
+		char name[254] = "";
+		int matches = 0;
+		matches = sscanf(argv[i], "--face-%d=%254c", &facenum, name);
+		if(matches == 2) {
+			if( facenum < 0 || facenum > faces.size()-1) {
+				qDebug() << "No face in position" << facenum;
+				continue;
+			}
+
+			faces[facenum].setName(QString::fromLocal8Bit(name));
+			qDebug() << "Setting face in position" << facenum << "#" << faces[facenum].id() <<  "to name" << faces[facenum].name();
+			trainingFaces.append(faces[facenum]);
+		}
+	}
+
+	if(trainingFaces.size() >= 1) {
+		qDebug() << "Training with" << trainingFaces.size() << "face(s)";
+		if(d->updateFaces(trainingFaces)) {
+			qDebug() << "Trained.";
+			d->saveConfig();
+		}
+	}
+
+	return 0;
 }
+	 
