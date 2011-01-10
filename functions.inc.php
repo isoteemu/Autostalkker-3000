@@ -44,8 +44,8 @@ class FacebookHack extends Facebook {
 }
 
 class FBUser {
-	public $id;
-	public $name;
+	public $id = null;
+	public $name = '';
 
 	// NOT a good place to be...
 	const PATH_PREFIX = '/home/teemu/Documents/Pictures/FB';
@@ -73,7 +73,7 @@ class FBUser {
 				$this->id = $id;
 				$this->name = trim($name);
 			} else {
-				$data = $this->getAttibutes($id);
+				$data = self::getAttibutes($id);
 				$this->id = $data['id'];
 				$this->name = $data['name'];
 			}
@@ -86,10 +86,15 @@ class FBUser {
 		}
 	}
 
-	protected function getAttibutes($id) {
-		if(!isset(self::$attributeCache[$id])) {
+	protected static function getAttibutes($id, $force_fetch=false) {
+		if(!isset(self::$attributeCache[$id]) || $force_fetch) {
 			global $facebook;
-			self::$attributeCache[$id] = $facebook->api('/'.$id);
+			$data = $facebook->api("/$id");
+			if($data) {
+				$id = $data['id'];
+				if(!isset(self::$attributeCache[$id])) self::$attributeCache[$id] = array();
+				self::$attributeCache[$id] += $data;
+			}
 		}
 		return self::$attributeCache[$id];
 	}
@@ -100,7 +105,7 @@ class FBUser {
 			self::$attributeCache[$id] = array();
 
 		self::$attributeCache[$id] += array(
-			'id' => $user->id,
+			'id' => $id,
 			'name' => $user->name
 		);
 	}
@@ -131,6 +136,17 @@ class FBUser {
 			}
 		}
 		return $list;
+	}
+
+	/**
+	 * Return user data
+	 */
+	public function data() {
+		$data = self::getAttibutes($this->id);
+		if(!isset($data['locale'])) {
+			$data = self::getAttibutes($this->id, true);
+		}
+		return $data;
 	}
 }
 
