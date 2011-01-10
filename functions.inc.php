@@ -150,41 +150,62 @@ class FBUser {
 	}
 }
 
-function parse_html_list($file) {
+/**
+ * Detect user location.
+ */
+function fb_user_geocode(FBUser &$user) {
+	if($user->location) return $user->location;
 
+	static $cache;
 	global $facebook;
 
-	//$html = file_get_contents('jutan-kaverit.txt');
-	$html = file_get_contents($file);
-	preg_match_all('#<li[^>]*>.*<img [^>]*src="([^"]+)"[^>]*>.*<a[^>]* href="([^"]+)">([^<]+)</a>.*</li>#Usm', $html, $list, PREG_SET_ORDER);
+	$userdata = $user->data();
+	print_r($userdata);
 
-	$ids = array();
+	$address = null;
+	if(isset($userdata['location']))
+		$address = $userdata['location'];
+	elseif(isset($userdata['hometown']))
+		$address = $userdata['hometown'];
 
-	foreach($list as $user) {
-		$data = new FBUser();
-		if(preg_match('#/profile.php\?id=(\d+)$#', $user[2], $id)) {
-			$data->id = $id[1];
-		} else {
-			preg_match('#.*/(.*)$#', $user[2], $id);
-			try {
-				echo "> Detecting ID for user {$id[1]} ... ";
+	if(!$address) return false;
 
-				$fb = $facebook->api('/'.$id[1]);
-				$data->id = $fb['id'];
-				echo "{$fb['id']}\n";
-
-			} catch(FacebookApiException $e) {
-				echo "### FAIL: ".$e->getMessage()."\n";
-				continue;
-			}
-		}
-
-		$data->name = trim($user[3]);
-
-		if($data->id && is_numeric($data->id))
-			$ids[$data->id] = $data;
+	if(isset($cache[$address['id']])) {
+		$user->location = $cache[$address['id']];
+		return $cache[$address['id']];
 	}
-	return $ids;
+
+	$locale = explode('_', $userdata['locale']);
+	$cc = strtolower($locale[1]);
+
+	$region_map = array(
+		'gb' => 'uk'
+	);
+
+	if(isset($region_map[$cc]))
+		$cc = $region_map[$cc];
+
+	$params = array(
+		'sensor' => 'false',
+		'address' => $address['name'],
+		'region' => $cc
+	);
+
+	$query = http_build_query($params);
+	$url = 'http://maps.googleapis.com/maps/api/geocode/json?'.$query;
+
+	$json = file_get_contents($url);
+	$data = json_decode($json);
+
+	if($data->status == 'OK') {
+		$cache[$address['id']] = $data->results[0]->geometry->location;
+	} else {
+		$cache[$address['id']] = false;
+	}
+
+	$user->location = $cache[$address['id']];
+
+	return $user->location;
 }
 
 function parse_ini_list($file) {
