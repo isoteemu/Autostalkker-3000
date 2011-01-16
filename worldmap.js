@@ -8,6 +8,10 @@ worldmap = {
 	scale: 1,
 	grid_step: 6, // How many pixels is used to group line targets.
 
+	max_score: 1,
+
+	line_max_score: 1,
+	
 	// Viewport target coordinates.
 	viewport: {
 		n: -90,
@@ -36,20 +40,38 @@ worldmap.lng2px = function(lng) {
 	return this.width * multi;
 }
 
-worldmap.drawLine = function(lat1, lng1, lat2, lng2, thickness) {
+worldmap.drawLine = function(line, intensity, direction) {
 	var ctx = this.canvas.getContext('2d');
 
-	this.updateViewportCoordinates(lat1, lng1);
-	this.updateViewportCoordinates(lat2, lng2);
+	ctx.save();
+	
+	if(typeof(intensity) == "undefined")
+		intensity = 1;
 
-	var color_step = 255 / this.line_thickness
-	var color = color_step * (thickness-1);
-	color += Math.round(Math.random()*color_step);
+	var from_lat = this.user.location.lat;
+	var from_lng = this.user.location.lng;
+	var to_lat	 = this.Util.array_sum(line.lat) / line.lat.length;
+	var to_lng	 = this.Util.array_sum(line.lng) / line.lng.length;
 
-	var x1 = worldmap.lng2px(lng1);
-	var x2 = worldmap.lng2px(lng2);
-	var y1 = worldmap.lat2px(lat1);
-	var y2 = worldmap.lat2px(lat2);
+	/*
+	this.updateViewportCoordinates(from_lat, from_lng);
+	this.updateViewportCoordinates(from_lng, to_lng);
+	*/
+	// TODO color by score
+
+	var color_step = 255 / this.line_max_score
+	var color = color_step * (line.score - 1);
+//	var brightness = (255 - color) * intensity;
+//	color += brightness;
+	color = Math.round(color);
+
+	var x1 = worldmap.lng2px(from_lng);
+	var x2 = worldmap.lng2px(to_lng);
+	var y1 = worldmap.lat2px(from_lat);
+	var y2 = worldmap.lat2px(to_lat);
+
+	if( x1 == x2 && y1 == y2 )
+		return;
 
 	min_y = Math.min(y1, y2);
 	max_y = Math.max(y1, y2);
@@ -59,35 +81,72 @@ worldmap.drawLine = function(lat1, lng1, lat2, lng2, thickness) {
 
 	cpy = min_y - (max_y - min_y) / 2;
 	cpx = max_x - (max_x - min_x) / 2;
+	
+	var red  = color;
+	var green =  color;
+	var blue = 127 + Math.max(color-127, 0);
+	var line_width = line.count / this.line_thickness * 3 / this.scale;
+
 	ctx.beginPath();
-	ctx.strokeStyle = "rgb("+color+","+color+","+(127+Math.max(color-128, 0))+")";
-	ctx.strokeStyle = "rgba("+color+","+color+","+(127+Math.max(color-128, 0))+",0.7)";
-	ctx.lineWidth = 2 / this.scale;
+	// ADD Clipping
+	var clip_width = (max_x - min_x) * (1 - intensity) * 1.5;
+	var clip_height = this.height;
+
+	var clip_y = 0
+	if(direction == 1) {
+		var clip_x = (x1 < x2) ? x2 - clip_width : x2;
+	} else {
+		var clip_x = (x1 < x2) ? x1 - line_width : x1 - clip_width - line_width;
+	}
+	//var clip_x = (x1 < x2) ? min_x + (max_x - min_y) * intensity : x2 + (max_x - (max_x - min_y) * intensity);
+
+	clip_width += line_width * 2
+	clip_height += line_width * 2;
+
+	ctx.lineWidth = 0;
+	ctx.rect(clip_x, clip_y, clip_width, clip_height);
+	ctx.clip();
+	ctx.beginPath();
+	ctx.lineWidth = line_width;
+	ctx.strokeStyle = "rgb("+red+","+green+","+blue+")";
+	ctx.strokeStyle = "rgba("+red+","+green+","+blue+", "+intensity+")";
+
 	ctx.lineCap = "round";
+	
 	ctx.moveTo(x1, y1);
 	ctx.quadraticCurveTo(cpx, cpy, x2, y2);
-
+	
 	ctx.stroke();
+
+	ctx.restore();
 
 }
 
-worldmap.plotPicture = function(id, lat, lng) {
-	var picture = new Image();
-	picture.onload = function() {
-		var width = this.width / 3
-		var height = this.height / 3
+worldmap.plotPicture = function(person, lat, lng) {
 
-		// Grow faces as more closer we get
-		width = width * Math.pow(1.02, worldmap.scale) / worldmap.scale;
-		height = height * Math.pow(1.02, worldmap.scale) / worldmap.scale;
+	var picture = person.picture;
 
-		var left = worldmap.lng2px(lng)-width/2;
-		var top  = worldmap.lat2px(lat)-height/2;
-
-		worldmap.canvas.getContext('2d').drawImage(this, left, top, width, height);
+	var width = picture.width / 2
+	var height = picture.height / 2
+	
+	if(typeof(person.score) != "undefined") {
+		var score_scale = person.score / this.max_score;
+	} else {
+		var score_scale = 0.5;
 	}
 
-	picture.src = 'http://graph.facebook.com/'+id+'/picture';
+	width = (width / 3) + (width / 3) * score_scale * 2;
+	height = (height / 3) + (height / 3) * score_scale * 2;
+
+	// Grow faces more as closer we get
+	width = width * Math.pow(1.02, this.scale) / this.scale;
+	height = height * Math.pow(1.02, this.scale) / this.scale;
+
+	var left = worldmap.lng2px(lng)-width/2;
+	var top  = worldmap.lat2px(lat)-height/2;
+
+	worldmap.canvas.getContext('2d').drawImage(picture, left, top, width, height);
+
 }
 
 worldmap.updateViewportCoordinates = function(lat, lng) {
@@ -137,8 +196,11 @@ worldmap.draw = function() {
 		'viewport_get',
 		'viewport_update',
 		'background',
+		'max_score',
+		'canvas_clean_state',
 		'faces',
-		'lines'
+		'remove_progressbar',
+		'run_effect'
 	];
 	this.drawSteps(steps);
 }
@@ -188,31 +250,56 @@ worldmap.drawSteps = function(steps) {
 			background.src = this.getBackround();
 			return;
 
-		case "faces":
-			window.status = "Loading faces";
+		case "max_score":
+			window.status = "Detecting best friend";
+			var best_friend = false;
 			for(id in this.friends) {
 				if(typeof(this.friends[id].location) != "object") continue;
+//				this.max_score = Math.max(this.max_score, (this.friends[id].score) ? this.friends[id].score : 1);
+				if(this.max_score < this.friends[id].score) {
+					this.max_score = this.friends[id].score;
+					best_friend = this.friends[id];
+				}
+			}
+
+			if(best_friend != false) {
+				worldmap.Ui.FBPost(best_friend);
+			}
+
+			return this.drawSteps(steps);
+		case "faces":
+			window.status = "Loading faces";
+
+			this.progressbar.set(1);
+			this.progressbar.oncomplete = function() {
+				worldmap.drawFaces();
+				worldmap.drawSteps(steps);
+			}
+
+			this.drawFace(this.user);
+
+			for(id in this.friends) {
+				if(typeof(this.friends[id].location) != "object") continue;
+				this.progressbar.steps++;
 				this.drawFace(this.friends[id]);
 			}
+			// And draw self too
+			this.drawFace(this.user);
+
+			return;
+
+		case "remove_progressbar":
+			window.status = "Removing progressbar";
+			this.progressbar.hide();
 			return this.drawSteps(steps);
 
-		case "lines":
-			window.status = "Drawing connection lines";
-			var lines = this.getConnectingLines();
-			for(key in lines) {
-				var line = lines[key];
-
-				this.drawLine(
-					this.user.location.lat,
-					this.user.location.lng,
-					this.Util.array_sum(line.lat) / line.lat.length,
-					this.Util.array_sum(line.lng) / line.lng.length,
-					line.count
-				);
-
-			}
+		case "canvas_clean_state":
+			this.canvas_clean_state = this.canvas.getContext("2d").getImageData(0, 0, this.canvas.width, this.canvas.height);
 			return this.drawSteps(steps);
 
+		case "run_effect":
+			this.runLineEffect();
+			return this.drawSteps(steps);
 		default:
 			console.log("Unknown step:", step);
 	}
@@ -221,7 +308,22 @@ worldmap.drawSteps = function(steps) {
 }
 
 worldmap.drawFace = function(person) {
-	this.plotPicture(person.id, person.location.lat, person.location.lng);
+	if(typeof(person.picture) != "object") {
+		person.picture = new Image();
+		person.picture.onload = person.picture.onerror = function() {
+			worldmap.progressbar.increment();
+		}
+		person.picture.src = 'http://graph.facebook.com/'+person.id+'/picture';
+	}
+}
+
+worldmap.drawFaces = function() {
+	for(id in this.friends) {
+		if(typeof(this.friends[id].picture) == "object") {
+			this.plotPicture(this.friends[id], this.friends[id].location.lat, this.friends[id].location.lng);
+		}
+	}
+	this.plotPicture(this.user, this.user.location.lat, this.user.location.lng);
 }
 
 // Load geocoded friend information.
@@ -248,7 +350,7 @@ worldmap._geocodeFriends = function(steps) {
 			cache:true,
 			success: function(data) {
 				if(data.location)
-					worldmap.friends[data.id].location = data.location;
+					jQuery.extend(worldmap.friends[data.id], data);
 			},
 			complete: function() {
 				worldmap.progressbar.increment();
@@ -259,6 +361,9 @@ worldmap._geocodeFriends = function(steps) {
 
 // Group lines
 worldmap.getConnectingLines = function() {
+	
+	this.line_max_score = 1;
+
 	lines = {};
 	for(id in this.friends) {
 		if(!this.friends[id].location) continue;
@@ -272,18 +377,33 @@ worldmap.getConnectingLines = function() {
 			lines[grp] = {
 				lat: [],
 				lng: [],
-				count: 0
+				count: 0,
+				score: 0,
+				score_weight: 0
 			};
 		}
 
 		lines[grp].count++;
+		lines[grp].score += this.friends[id].score;
+		lines[grp].score_weight += this.friends[id].score_weight;
 		lines[grp].lat.push(this.friends[id].location.lat);
 		lines[grp].lng.push(this.friends[id].location.lng);
+
+		this.line_max_score = Math.max(this.line_max_score, lines[grp].score);
 
 		this.max_lines = Math.max(this.max_lines, lines[grp].count);
 	}
 
-	return lines;
+	// Convert object into array and sort ascending by score
+	var sortable = []
+	for (var group in lines)
+		sortable.push(lines[group])
+	  
+	sortable.sort(function(a, b) {
+		return a.score - b.score;
+	});
+
+	return sortable;
 }
 
 worldmap.alignLine2grid = function(pos) {
@@ -294,6 +414,54 @@ worldmap.alignLine2grid = function(pos) {
 	return Math.round(pos / this.grid_step * pres) * this.grid_step / pres; 
 }
 
+
+worldmap.runLineEffect = function() {
+	lines = this.getConnectingLines();
+	this.timer_start = new Date().getTime();
+	worldmap.redrawLines(lines);
+}
+
+worldmap.redrawLines = function(lines, states) {
+	if(!states)
+		states = [];
+
+	var now = (new Date().getTime() - this.timer_start) / 1000;
+
+	this.canvas.getContext("2d").putImageData(this.canvas_clean_state, 0, 0);
+
+	this.drawFaces();
+	
+	for(var i=0; i< lines.length; i++) {
+		var line = lines[i];
+
+		var effect_time = this.line_max_score / line.score;
+
+		var intensity = 0;
+		if(effect_time > 0) {
+			intensity = 1 - ((now % effect_time) / effect_time);
+		}
+
+		if(typeof(states[i]) != "object") {
+			states[i] = {
+				direction: 0
+			};
+		}
+		if(states[i].intensity < intensity) {
+			// New line. Get direction
+			var dir = line.score_weight / line.count;
+			states[i].direction = (dir >= Math.random()) ? 0 : 1;
+		}
+
+		states[i].intensity = intensity;
+
+		this.drawLine(line, intensity, states[i].direction);
+	}
+	// 25 fps
+	this.timer = setTimeout(function() {
+		worldmap.redrawLines(lines, states);
+	}, 40);
+}
+
 worldmap.progressbar = {
 	node: $('#progressbar').progressbar(),
 	steps: 1,
@@ -302,6 +470,7 @@ worldmap.progressbar = {
 	oncomplete: function() {},
 
 	set: function(steps) {
+		this.node.show();
 		this.oncomplete = function() {};
 		this.steps=steps;
 		this.value = 0;
@@ -317,6 +486,92 @@ worldmap.progressbar = {
 		if(progress == 100)
 			this.oncomplete();
 	},
+	
+	hide: function() {
+		this.node.hide();
+	}
+}
+
+worldmap.Ui = {
+
+	FBPost: function(best_friend) {
+		var img = 'http://graph.facebook.com/'+worldmap.user.id+'/picture?type=square';
+		var app_id = $('head meta[property="fb:app_id"]').attr('content');
+		var picture = $('head meta[property="og:image"]').attr('content');
+		var link = 'http://apps.facebook.com/worldoffriendlylove/';
+		var name = $('head title').text();
+
+		var location = best_friend.location.address;
+		var caption = "";
+		var message = "My greatest and bestest friend in the whole wide world hangs out at "+location+".\nI lov' you bro!";
+
+		var description = location+" 'rocks, according to city blocks.";
+		
+		var actions = "[{name:'dat man', link:'http://www.facebook.com/profile.php?id="+best_friend.id+"'}]";
+		
+		var dialog = '<form method="GET" action="http://www.facebook.com/dialog/feed" class="uiUfiAddComment clearfix ufiItem ufiItem uiListItem  uiListVerticalItemBorder uiUfiAddCommentCollapsed"> \
+			<input type="hidden" name="app_id" value="'+app_id+'" /> \
+			<input type="hidden" name="link" value="'+link+'" /> \
+			<input type="hidden" name="picture" value="'+picture+'" /> \
+			<input type="hidden" name="name" value="'+name+'" /> \
+			<input type="hidden" name="caption" value="'+caption+'" /> \
+			<input type="hidden" name="redirect_uri" value="'+window.location+'" /> \
+			<input type="hidden" name="description" value="'+description+'" /> \
+			<input type="hidden" name="actions" value="'+actions+'" /> \
+			<img alt="" src="'+img+'" class="uiProfilePhoto actorPic UIImageBlock_Image UIImageBlock_ICON_Image uiProfilePhotoMedium img"> \
+			<div class="commentArea UIImageBlock_Content UIImageBlock_ICON_Content"> \
+			<div class="commentBox"> \
+			<textarea name="message" placeholder="Post to profile..." title="Post to profile..." class="uiTextareaNoResize uiTextareaAutogrow textBox textBoxContainer">'+message+'</textarea> \
+			</div> \
+			<label class="mts commentBtn stat_elem uiButton uiButtonConfirm"> \
+			<input type="submit" name="comment" value="Post" /> \
+			</label></div></form>';
+		$('#post-to-profile').html(dialog);
+		$('#post-to-profile textarea, #post-to-profile submit').focus(function(e) {
+			$('#post-to-profile, #post-to-profile submit').addClass('child_is_focused');
+		});
+		$('#post-to-profile textarea, #post-to-profile submit').blur(function() {
+			setTimeout(function() {
+				$('#post-to-profile').removeClass('child_is_focused');
+			}, 250);
+		});
+
+		$('#post-to-profile form').submit(function() {
+			if(typeof(FB.ui) == "function") {
+				FB.ui({
+					method: 'feed',
+					app_id: $('form :input[name=app_id]').val(),
+					picture: $('form :input[name=picture]').val(),
+					message: $('form :input[name=message]').val(),
+					name: $('form :input[name=name]').val(),
+					link: $('form :input[name=link]').val(),
+					caption: $('form :input[name=caption]').val(),
+					description: $('form :input[name=description]').val(),
+					actions: $('form :input[name=actions]').val(),
+				});
+				return false;
+			}
+		});
+
+		// Change into citys' picture, if found.
+		if(typeof(FB) == "object") {
+			var search = 'search?type=page&q='+best_friend.location.address;
+			FB.api(search, function(response) {
+				var data = response.data;
+				for (var i=0; i<data.length; i++) {
+					if(data[i].category == "City") {
+						var url = window.location.protocol + "//"
+							+ window.location.hostname
+							+ window.location.pathname
+							+ "picture.php?id="+escape(data[i].id);
+						$('#post-to-profile :input[name=picture]').val(url);
+						break;
+					}
+				}
+			});
+		}
+	}
+
 }
 
 worldmap.Util = {

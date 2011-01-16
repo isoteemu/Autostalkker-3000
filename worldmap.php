@@ -23,19 +23,21 @@ class worldmap {
 	/**
 	 * Group lines which spans # of degrees
 	 */
-	public $grid = 6;
+	public $grid = 3;
 
 	protected $errors = array();
 
 	public function __construct(FBUser &$user) {
 		$this->user =& $user;
-		$this->friends = $user->friends();
+		foreach($user->friends() as $friend) {
+			$this->addFriend($friend);
+		}
 
 		$this->map_scales = $this->getMapsScales();
 	}
 
-	public function addFriend(FBUser $user) {
-		$this->friends[$user->id] = $user;
+	public function addFriend(FBUser &$user) {
+		$this->friends[$user->id] =& $user;
 	}
 
 	public function drawLineTo(FBUser $to) {
