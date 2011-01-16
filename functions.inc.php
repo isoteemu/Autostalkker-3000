@@ -2,6 +2,8 @@
 
 require 'php-sdk/src/facebook.php';
 
+include_once 'apc-cache-hack.inc.php';
+
 /// TODO: Implement cached api()
 class FacebookHack extends Facebook {
 	public function getUrl($name, $path='', $params=array()) {
@@ -39,8 +41,56 @@ class FacebookHack extends Facebook {
         $info = curl_getinfo($curl);
 
 		return $info['url'];
-
 	}
+
+	public function cache_get($key) {
+		if(!function_exists('apc_fetch'))
+			return null;
+
+		$session = $this->getSession();
+		if(!$session)
+			return null;
+
+		$uid = $this->getUser();
+		$key = "$uid:$key";
+
+		return apc_fetch($key);
+	}
+
+	public function cache_set($key, $data, $expires=null) {
+		if(!function_exists('apc_store'))
+			return false;
+
+		$session = $this->getSession();
+		if(!$session)
+			return false;
+
+		$uid = $session['uid'];
+
+		if($expires === null)
+			$expires = $session['expires'];
+
+		$key = "$uid:$key";
+
+		return apc_store($key, $data, $expires);
+	}
+
+	protected function makeRequest($url, $params, $ch=null) {
+		// We don't care about some variables:
+		$cached = $params;
+		unset($cached['method']);
+		unset($cached['access_token']);
+
+		$cid = $url.http_build_query($cached);
+		$data = $this->cache_get($cid);
+		if($data)
+			return $data;
+
+		$data = parent::makeRequest($url, $params, $ch);
+		$this->cache_set($cid, $data);
+		return $data;
+	}
+
 }
 
 class FBUser {
@@ -154,13 +204,12 @@ class FBUser {
  * Detect user location.
  */
 function fb_user_geocode(FBUser &$user) {
-	if($user->location) return $user->location;
+	if(isset($user->location)) return $user->location;
 
 	static $cache;
 	global $facebook;
 
 	$userdata = $user->data();
-	print_r($userdata);
 
 	$address = null;
 	if(isset($userdata['location']))
@@ -194,11 +243,29 @@ function fb_user_geocode(FBUser &$user) {
 	$query = http_build_query($params);
 	$url = 'http://maps.googleapis.com/maps/api/geocode/json?'.$query;
 
-	$json = file_get_contents($url);
-	$data = json_decode($json);
+	$data = (function_exists('apc_fetch')) ? apc_fetch($url) : null;
+	if(!$data) {
+		$ch = curl_init();
+
+		if($_SERVER["HTTP_USER_AGENT"])
+			curl_setopt($ch, CURLOPT_USERAGENT, $_SERVER["HTTP_USER_AGENT"]);
+
+		curl_setopt($ch, CURLOPT_URL, $url);
+		curl_setopt($ch, CURLOPT_HEADER,0);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+
+		$json = curl_exec($ch);
+		curl_close($ch);
+
+		$data = json_decode($json);
+		if(function_exists('apc_store'))
+			apc_store($url, $data);
+	}
 
 	if($data->status == 'OK') {
 		$cache[$address['id']] = $data->results[0]->geometry->location;
+		$cache[$address['id']]->address = $data->results[0]->formatted_address;
 	} else {
 		$cache[$address['id']] = false;
 	}
